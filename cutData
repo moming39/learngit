@@ -1,0 +1,22 @@
+import pandas as pd
+import numpy as np
+try:
+    data = pd.read_csv("rb1901.csv",index_col=0)
+    n = len(data)
+
+    np.save("data1.npy",data.values[:n/3])
+    np.save("data2.npy",data.values[n/3:2*n/3])
+    np.save("data3.npy", data.values[2*n/3:])
+    np.save("indexdata.npy",data.index)
+    np.save("coldata.npy",data.columns)
+except:
+    data1 = np.load("data1.npy")
+    data2 = np.load("data2.npy")
+    data3 = np.load("data3.npy")
+    index = np.load("indexdata.npy")
+    col = np.load("coldata.npy")
+    data = np.r_[data1,data2,data3]
+    data = pd.DataFrame(data,index=index,columns=col)
+    data.to_csv("rb1901.csv", header=True, index=True)
+
+#data.index = pd.to_datetime(data.index)
