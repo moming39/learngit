@@ -1,0 +1,355 @@
+# -*- coding: utf-8 -*-
+
+from __future__  import division
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+import statsmodels.api as sm
+import statsmodels.stats.api as smf
+
+import fitting
+import logging
+import time
+from commonTest import ge_summary
+def is_listlike(a):
+    try:
+        if isinstance(a[0],float) or isinstance(a[0],int):
+            return True
+        else:
+            assert True,"a type Error"
+    except:
+        return False
+
+def varTest(varName = None,yType=('mabp','last','vwap','qwap'),args=None,GLS='ridge',alpha = None,qcut= 0,yCut=None,qType='rank',rejTime=0,isDiff=True,ts = 20,level = logging.INFO,saveyRes=None,yRes = None,cvK=10,is_log=False,isTrans=False):
+    ans = {}
+    if isinstance(varName,list):
+        _file = "allVarTest/test_{}{}.log".format("-".join(varName),time.strftime("%m-%d_%H_%M_%S", time.localtime(time.time())))
+    else:
+        _file = "allVarTest/test_{}{}.log".format("".join(varName),
+                                                  time.strftime("%m-%d_%H_%M_%S", time.localtime(time.time())))
+    print _file
+    tStart= time.time()
+    logging.basicConfig(filename=_file, level=level)
+    try:
+        yType[0]
+        if isinstance(yType, str):
+            yType = [yType,]
+    except:
+        yType = [yType,]
+    for _yType in yType:
+        #print alpha
+        res, r2 = fitting.main(yType=_yType,args=args,GLS=GLS,alpha =alpha,qcut=qcut,yCut=yCut,qType=qType,is_log=is_log, varName = varName,varTest=True,rejTime = rejTime,isDiff=isDiff,ts = ts,saveyRes=saveyRes,yRes=yRes,cvK=cvK,isTrans=isTrans)
+        logging.info("----")
+        try:
+            logging.info(res["1"].summary())
+            logging.info(res["-1"].summary())
+        except:
+            try:
+                logging.info(res["1"].coef_)
+                logging.info(res["-1"].coef_)
+            except:
+                pass
+        try:
+            pd.set_option('display.max_columns',None)
+            pd.set_option('display.max_rows',None)
+            logging.info("================= no const verifiable X test================")
+            logging.info(ge_summary(res["-1test"]))
+            logging.info(res["-1test"]["r2"])
+            print ge_summary(res["-1test"])
+            print res["-1test"]["r2"]
+            logging.info("=================  const verifiable X test================")
+            logging.info(ge_summary(res["1test"]))
+            logging.info(res["1test"]["r2"])
+            print ge_summary(res["1test"])
+            print res["1test"]["r2"]
+        except:
+            pass
+        logging.info(r2)
+        ans[_yType] = max(r2.loc["adjR2","1"],r2.loc["adjR2","-1"])
+        #ans[_yType+"vX"] = max(res["1test"]["r2"]["adjR2"],res["-1test"]["r2"]["adjR2"])
+        try:
+            print "-1col:\t",res["-1col"]
+            print "1col:\t", res["1col"]
+            logging.info(["-1col:\t",res["-1col"]])
+            logging.info(["1col:\t", res["1col"]])
+        except:
+            pass
+        try:
+            if not is_listlike(alpha):
+                _adjr2 = max(res["cvRes"]["1"][0],res["cvRes"]["-1"][0])
+                ans[_yType+"cvadjR2"] = _adjr2
+            else:
+                logging.debug(["print debug:",1])
+                logging.debug([res])
+                _adj1r2 = res["cvRes"]["1"][0]
+                _adj0r2 = res["cvRes"]["-1"][0]
+                logging.debug(["print debug:", 2])
+                plt.figure(figsize=(20, 16))
+                logging.debug(["print debug:", 3])
+                plt.plot(alpha, _adj1r2, label='alpha-const_cvAdj.R2')
+                plt.plot(alpha, _adj0r2, label='alpha-cvAdj.R2')
+                plt.legend()
+                plt.savefig('figure/{}alpha-R2{}'.format(GLS,time.strftime("%m-%d_%H_%M_%S", time.localtime(time.time()))))
+                plt.show()
+                print "best alpha with const "
+                logging.info("best alpha with const ")
+                #print type(_adj1r2)
+                print alpha[_adj1r2 == _adj1r2.max()]
+                logging.info("best alpha without const ")
+                print "best alpha without const "
+                #print type(_adj0r2)
+                logging.info(alpha[_adj0r2 == _adj0r2.max()])
+                logging.debug(["print debug:", 1])
+                print alpha[_adj0r2 == _adj0r2.max()]
+
+                def myfunc(x, y, _type=1):
+                    x = np.array(x).reshape(-1)
+                    y = np.array(y).reshape(-1)
+                    z = np.r_[x, y]
+                    if _type == 1:
+                        return z.max()
+                    else:
+                        return z.mean()
+                ans[_yType + "cvadjR2"] = myfunc(_adj0r2[_adj0r2 == _adj0r2.max()],_adj1r2[_adj1r2 == _adj1r2.max()],_type=1)
+                ans[_yType + "bestAlpha"] = myfunc(alpha[_adj0r2 == _adj0r2.max()], alpha[_adj1r2 == _adj1r2.max()],_type=0)
+                #print ans[_yType + "cvadjR2"],ans[_yType + "bestAlpha"]
+                return ans, _adj0r2, _adj1r2
+        except:
+            pass
+    logging.info(["total running time:",round(time.time()-tStart/60,2),"min"])
+    return ans
+
+def bestAlpha(name,args,alpha=3.14,gls = 'ridge',yType='mabp',ts = 20,qcut=100,rejTime=0,isDiff=True,isLog=False,isTrans=False,level=logging.INFO,cvK=10):
+    try:
+        alpha[0]
+    except:
+        alpha = [alpha,]
+    try:
+        _name = name + args.keys()
+    except:
+        _name = name
+    #ans = np.zeros(len(alpha))
+    tmp = {}
+    for yCut in ['norm', ]:  # ,'mid','right','left','rank']:
+        for qType in ['norm', ]:  # , 'mid','right','left','rank']:
+            what = 'all'
+            _tmp= varTest(_name, args=args, yType=yType, GLS=gls, alpha=alpha, ts=ts, qcut=qcut,
+                                    yCut=yCut, qType=qType, rejTime=rejTime, isDiff=isDiff,is_log=isLog,
+                                    level=level,cvK=cvK,isTrans=isTrans)  # ,saveyRes=i,yRes="base")
+            try:
+                tmp[what] = _tmp[0]
+                r1,r0 = _tmp[1],_tmp[2]
+            except:
+                tmp[what] = _tmp
+                r1,r0 = None,None
+            dt = pd.DataFrame(tmp).T
+            print "allVarTest/{}y{}x{}ts{}Test{}{}.csv".format(what, yCut, qType, ts, _name[-1], len(_name))
+            print dt
+            dt.to_csv("allVarTest/{}y{}x{}ts{}Test{}{}.csv".format(what, yCut, qType, ts, _name[-1], len(_name)),
+                      header=True, index=True)
+
+    return r1,r0
+
+def traversalTest(qcut = 1000,_name = None,isDiff = True,YCut = ['norm',],QType=['norm',],filename = 'ask'):
+    qcut = 1000
+    for yCut in YCut:#,'mid','right','left','rank']:
+        for qType in QType:#'mid','right','left','rank']:
+            # yCut = 'mid'
+            # for _i in xrange(len(_name)):
+            # for
+            for i,_i in enumerate(_name):
+                #ans[_i] = varTest(_name[_i:],rejTime=2,isDiff=False,level=level)
+                ans[_i] = varTest(_i,ts=ts,qcut=qcut,yCut=yCut,qType=qType,rejTime=2, isDiff=isDiff, level=level)#,saveyRes=i,yRes="base")
+            dt = pd.DataFrame(ans).T
+            print "allVarTest/{}y{}x{}ts{}Test{}{}.csv".format(filename,yCut,qType,ts,_name[-1],len(_name))
+            print dt
+            dt.to_csv("allVarTest/{}y{}x{}ts{}Test{}{}.csv".format(filename,yCut,qType,ts,_name[-1],len(_name)), header=True, index=True  )
+
+            # varName = "signUpDown"
+            # for i in np.arange(1,10,1):
+            #     ans[varName+"{}".format(i)] = varTest(varName,args=i, ts=ts, rejTime=2, isDiff=isDiff, level=level)  # ,saveyRes=i,yRes="base")
+            # dt = pd.DataFrame(ans).T
+            # print dt
+            # dt.to_csv("testAns/{}Test{}{}.csv".format(ts, varName, len(_name)), header=True, index=True)
+
+
+if __name__ == "__main__":
+    _LEVEL = logging.INFO
+    # for i in range(6,10):
+    #    test_tick_nu(0,i)
+    # test_tick_nu("mabp",tick_nu = 0,ask_bid=0)
+    # test_tick_nu("vabp",tick_nu=0, ask_bid=0)
+    # for i in range(60):
+    #     global _I
+    #     _I = i
+    #     test_tick_nu(i,0)
+    ts = 20
+
+    #ans = varTest(["obv","mabp","mabpEWM","fundSpread"], ts=ts, rejTime=2, isDiff=False, level=logging.DEBUG, saveyRes="base")
+    #print ans
+    _name = ["ratioL","ratio","last","lastD","lastLog","vwap","vwapD","vwapLog","askQty","bidQty","volume","openInterest","bidPrc","askPrc","turnover","askDaskbidQty"]
+    ans = {}
+    #"ratioL","ratio",
+    _name = ["lastD","lastLog","vwapD","vwapLog"
+            ,"signUpDownL",
+             "sov","sovEWM","qwapD","askDaskbidQty",
+             "fundSpread","askbidDtotalRatio","fundSpreadEWM","askDaskbidQtyEWM",
+             "mabpD","mabpDEWM","signUpDown","qwapDEWM","vwapDEWM","askbidDturnover"]
+      # _name = ["unsov","gammasov","sov","sovEWM"]
+    level = logging.INFO
+    # level = logging.DEBUG
+    _name = ["askDaskbidQtyR", "askDaskbidQty", "mabpDEWM", "mabpD", "qwap", "qwapD", "lastD", "lastLog", "fundSpread",
+             "fundSpreadEWM", "sov", "sovEWM",
+             "askbidDtotalRatio", "askbidDtotalRatioR", "askbidDtotalRatioEWM", "soo", "sooEWM", "signUpDown",
+             "signUpDownL", "midDvwap", "qwapDvwap"]
+
+
+    # isDiff = False
+    # qcut = 1000
+
+    isDiff = True
+    qcut = 1000
+
+    #_name = ["qwapDvwap",]
+    #test
+    # args = {"qwapDvwap":[2,12],}
+    # _name = args.keys()
+
+
+    # args = {"rsvEWM":1}
+    # _name = args.keys()
+    alpha = 0.01
+    # args = {'askbidDtotalRatio':None,
+    #         'mabpDEWM':[1,2],
+    #         'askbidDtotalRatioR':[1,5,6,7,8],
+    #         'fundSpreadEWM':[6,7],
+    #         'askDaskbidQtyR1':[1,5,6,7,8],
+    #         'signUpDown':[2,12],
+    #         'qwapDvwap':[1,2,3]}
+    #_name = args.keys()
+    #alpha = 0.001
+    # args = {'qwap':None, 'qwapD':None, }
+    # a={'fundSpread':None, 'askbidDtotalRatio':None, 'signUpDownL':None,
+    # 'mabpD':1,'askbidDtotalRatioR1':[1,3,4,5,6,7,8], 'askbidDtotalRatioEWM':1.0, 'signUpDown':12,
+    # 'sov':[1,2,3,4,5,7,8,9],'rsv':[4,5,11],
+    #  'midDvwap':[1,2,3,4,5,6,7,8,10,15],
+    #  'mabpDEWM':[1,4,7,11],
+    #  'fundSpreadEWM':[2,3],
+    #  'askDaskbidQtyR':[1,3,4,5,6,7],
+    #  'sovEWM':1.0}
+    # _name = args.keys()
+    rejTime = 0
+    yType='mabp'
+    # gls = None,ridge,lasso,ols 'kernel'l
+    gls = 'ridge'
+    #
+    _name = ["askDaskbidQty", "qwapD", "lastD", "lastLog", "fundSpread", "askbidDtotalRatio", "signUpDownL"]
+    args = {"askDaskbidQtyR": range(2, 22),# 2
+            "mabpDEWM": np.arange(0.1, 2,0.1), # 1.4
+            "fundSpreadEWM": range(1, 20), #0
+            'mabpD': 1,
+            "askbidDtotalRatioR": range(2, 25),
+            "askbidDtotalRatioEWM": np.arange(0.01, 4.5, 0.2),#mabp 0.2
+            # "sooEWM":40
+            "sovEWM": np.arange(1,2.1, 0.1),
+            "signUpDown": range(1,13),  # 5
+            "midDvwap": np.arange(1, 16),# 2
+            "qwapDvwap": np.arange(1, 16),# 2
+            "soo":range(50,61),#60
+            "sov": np.arange(1, 20), #9
+            "rsv": range(2, 22),#8
+            # "rsvEWM":0.1
+            }
+    #cross validation
+    _name = ["askDaskbidQty", "qwapD", "lastD", "lastLog",  "askbidDtotalRatio", "signUpDownL"]
+    args = {"askDaskbidQtyR": range(2, 13),  # 2
+            "fundSpread": range(1,15),#2
+            "mabpDEWM": np.arange(0.1, 2, 0.1),  # 1.3
+            "fundSpreadEWM": np.arange(0.1, 1.7,0.1),  # 0
+            'mabpD': range(1,14),#1
+            "askbidDtotalRatioR": range(2, 14),#2
+            "askbidDtotalRatioEWM": np.arange(0.1, 2, 0.1),  #  0.2
+            # "sooEWM":40
+            #"sovEWM": np.arange(1, 2.1, 0.1),
+            "signUpDown": range(1, 13),  # 3
+            "midDvwap": np.arange(1, 16),  # 2
+            "qwapDvwap": np.arange(1, 16),  # 2
+            #"soo": range(50, 61),  # 60
+            #"sov": np.arange(1, 20),  # 9
+            "rsv": range(2, 22),  # 8
+            # "rsvEWM":0.1
+            }
+    #args = {'rsv': 1,}
+    # _name = _name + args.keys()
+    #_name = args.keys()
+    alpha = 3.14
+    # for yCut in ['norm', ]:  # ,'mid','right','left','rank']:
+    #     for qType in ['norm',]:#, 'mid','right','left','rank']:
+    #         # yCut = 'mid'
+    #         # for _i in xrange(len(_name)):
+    #         # for
+    #         # ans[_i] = varTest(_name[_i:],rejTime=2,isDiff=False,level=level)
+    #         what = 'all'
+    #         for i in xrange(3,30,1):
+    #             what = i
+    #             args[args.keys()[0]] = np.arange(i)
+    #             print  args
+    #             ans[what] = varTest(_name, args=args,yType=yType,GLS=gls,alpha=alpha,ts=ts, qcut=qcut, yCut=yCut, qType=qType, rejTime=rejTime, isDiff=isDiff,
+    #                               level=level)  # ,saveyRes=i,yRes="base")
+    #         dt = pd.DataFrame(ans).T
+    #         print "allVarTest/{}y{}x{}ts{}Test{}{}.csv".format(what,yCut, qType, ts, _name[-1], len(_name))
+    #         print dt
+    #         dt.to_csv("allVarTest/{}y{}x{}ts{}Test{}{}.csv".format(what,yCut, qType, ts, _name[-1], len(_name)),
+    #               header=True, index=True)
+
+
+
+
+
+    _name = ["askDaskbidQty", "qwapD", "lastD", "lastLog", "askbidDtotalRatio", "signUpDownL"]
+    args = {"askDaskbidQtyR": range(2, 13),  # 2
+            "fundSpread": range(1, 15),  # 2
+            "mabpDEWM": np.arange(0.1, 2, 0.1),  # 1.3
+            "fundSpreadEWM": np.arange(0.1, 1.7, 0.1),  # 0
+            'mabpD': range(1, 14),  # 1
+            "askbidDtotalRatioR": range(2, 14),  # 2
+            "askbidDtotalRatioEWM": np.arange(0.1, 2, 0.1),  # 0.2
+            # "sooEWM":40
+            # "sovEWM": np.arange(1, 2.1, 0.1),
+            "signUpDown": range(1, 13),  # 3
+            "midDvwap": np.arange(1, 16),  # 2
+            "qwapDvwap": np.arange(1, 16),  # 2
+            # "soo": range(50, 61),  # 60
+            # "sov": np.arange(1, 20),  # 9
+            "rsv": range(2, 22),  # 8
+            # "rsvEWM":0.1
+            }
+    _Nu = 1000
+    args = {"askDaskbidQtyR": range(2, _Nu),  # 2
+            "fundSpread": range(1, _Nu),  # 2
+            "mabpDEWM": np.arange(0.5, _Nu/2, 0.5),  # 1.3
+            "fundSpreadEWM": np.arange(0.5, _Nu/2, 0.5),  # 0
+            'mabpD': range(1, _Nu),  # 1
+            "askbidDtotalRatioR": range(2, _Nu),  # 2
+            "askbidDtotalRatioEWM": np.arange(0.5, _Nu/2, 0.5),  # 0.2
+            # "sooEWM":40
+            # "sovEWM": np.arange(1, 2.1, 0.1),
+            "signUpDown": range(1, _Nu),  # 3
+            "midDvwap": np.arange(1, _Nu),  # 2
+            "qwapDvwap": np.arange(1, _Nu),  # 2
+            # "soo": range(50, 61),  # 60
+            # "sov": np.arange(1, 20),  # 9
+            "rsv": range(2, _Nu),  # 8
+            # "rsvEWM":0.1
+            }
+    # _name = ["askDaskbidQty"]
+    #
+    # _name = []
+    # args = {"askDaskbidQtyR": range(2)}
+    isTrans = False
+    isLog = False
+    cvK=10
+    ans = bestAlpha(name=_name,args=args,gls='ridge',alpha=10**(np.arange(1,10,0.5)),cvK=cvK,level=logging.INFO,isLog=isLog,isTrans=isTrans)
+    #print ans
